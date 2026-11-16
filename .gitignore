@@ -3,3 +3,5 @@ __pycache__/
 results/
 runs/
 *.zip
+.venv*/
+hardware/crazyflie/logs/
