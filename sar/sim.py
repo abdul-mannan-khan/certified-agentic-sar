@@ -14,7 +14,7 @@ What it models (each item answers a reviewer point):
   and the safe MPC at 5 Hz (sar/nmpc.py), with an imperfect plant
   (acceleration lag and bounded gusts).
 
-Policies: "greedy", "hungarian" (v1-style assignment alone), "best_of"
+Policies: "greedy", "hungarian" (v1-style assignment alone), "frontier", "best_of"
 (greedy + Hungarian, keep the better), "certified" (learned proposer behind the
 beta gate; any callable), "lawnmower" and "random".
 """
@@ -92,6 +92,7 @@ class Mission:
         self.cfg, self.rng = cfg, np.random.default_rng(seed)
         self.record, self.trace, self.nfz_trace = record, [], []
         self.looks, self.planned = [], {}
+        self.seen = None
         self.seed = seed
         c = cfg
         self.n = int(round(c.size / c.cell))
@@ -115,6 +116,7 @@ class Mission:
             self.p *= c.n_survivor_expected / max(1e-9, self.p.sum()); self.p = np.clip(self.p, 0, 0.6)
         self.truth = self.rng.random(self.p.size) < self.p      # ground truth drawn from the prior
         self.found = np.zeros_like(self.truth)
+        self.seen = np.zeros(self.p.size, bool)   # cells inside any footprint so far (frontier baseline)
         # NFZs
         self.nfz = []
         for _ in range(c.n_nfz):
@@ -165,6 +167,7 @@ class Mission:
         """Look from UAV i's current cell; returns detected cells."""
         s = self.cell_of(self.x[i, :2])
         self.looks.append(s)
+        self.seen[self.model.footprint(s)[0]] = True
         cells, q = self.true_model.footprint(s)
         hit = cells[(self.truth[cells] & ~self.found[cells]) & (self.rng.random(len(cells)) < q)]
         self.found[hit] = True
@@ -238,6 +241,20 @@ class Mission:
                     ub = upper_bound(o, A); ratios.append(o.value() / ub if ub > 0 else 1.0); det_mass += o.value()
                 elif policy == "random":
                     acts = [int(self.rng.choice(a)) for a in A]
+                    o = obj.copy(); [o.add(a) for a in acts]
+                    ub = upper_bound(o, A); ratios.append(o.value() / ub if ub > 0 else 1.0); det_mass += o.value()
+                elif policy == "frontier":
+                    # frontier exploration (Yamauchi 1997), multi-UAV: each UAV claims the nearest (free-path) cell
+                    # that no look has covered yet; one hop per epoch towards it
+                    acts, claimed = [], set()
+                    for i in live:
+                        cur = self.cell_of(self.x[i, :2])
+                        dfree = free_distances(cur, self.n, self.n, c.cell, blocked)
+                        cand = np.flatnonzero(~self.seen & np.isfinite(dfree) & ~blocked)
+                        cand = [k for k in cand if k not in claimed]
+                        tgt = int(min(cand, key=lambda k: dfree[k])) if cand else cur
+                        claimed.add(tgt)
+                        acts.append(min(sets[i], key=lambda a: np.hypot(cx[a] - cx[tgt], cy[a] - cy[tgt])))
                     o = obj.copy(); [o.add(a) for a in acts]
                     ub = upper_bound(o, A); ratios.append(o.value() / ub if ub > 0 else 1.0); det_mass += o.value()
                 elif policy == "lawnmower":
