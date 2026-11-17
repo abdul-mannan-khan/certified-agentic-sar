@@ -5,3 +5,7 @@ runs/
 *.zip
 .venv*/
 hardware/crazyflie/logs/
+cloud/instance.txt
+cloud/ssh.txt
+cloud/hardstop.pid
+cloud/vast.log
