@@ -2,3 +2,5 @@
 2026-11-17_06:47:31 ready: ssh -p 44631 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -o BatchMode=yes -o LogLevel=ERROR -o ServerAliveInterval=30 root@115.73.217.180
 bash: warning: setlocale: LC_ALL: cannot change locale (en_US.UTF-8)
 2026-11-17_06:58:46 run_all started
+2026-11-17_07:18:58 pulled: 2026-11-17_06:59:26 campaigns restarted after metric fix (989f522)
+2026-11-17_07:39:06 pulled: 2026-11-17_07:20:17 main done

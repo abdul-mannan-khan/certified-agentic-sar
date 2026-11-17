@@ -39,7 +39,8 @@ class SimConfig:
     cell: float = 50.0            # m
     n_uav: int = 4
     base: tuple = (25.0, 25.0)    # m, launch/recovery point
-    v_cruise: float = 10.0        # m/s, planning speed
+    v_cruise: float = 10.0        # m/s, planning speed (reachable sets)
+    v_ref: float = 0.0            # m/s, reference speed for the MPC (0 = v_cruise); > v_cruise gives slack for autopilot lag
     epoch: float = 10.0           # s, tactical epoch Delta
     t_max: float = 1800.0         # s, mission limit
     endurance: float = 1500.0     # s, battery
@@ -344,15 +345,16 @@ class Mission:
             pts.append(self.model.centres[target])
         pts = np.array(pts)
         seg = np.diff(pts, axis=0); L = np.linalg.norm(seg, axis=1); s_tot = L.sum()
-        n_steps = max(1, int(np.ceil(s_tot / (c.v_cruise * m.dt))))
-        s = np.minimum(np.arange(1, n_steps + 1) * c.v_cruise * m.dt, s_tot)
+        vr = c.v_ref or c.v_cruise
+        n_steps = max(1, int(np.ceil(s_tot / (vr * m.dt))))
+        s = np.minimum(np.arange(1, n_steps + 1) * vr * m.dt, s_tot)
         cum = np.r_[0, np.cumsum(L)]
         out = []
         for sk in s:
             j = min(int(np.searchsorted(cum, sk, side="right")) - 1, len(L) - 1)
             u = seg[j] / max(L[j], 1e-9)
             pos = pts[j] + u * (sk - cum[j])
-            vel = u * c.v_cruise if sk < s_tot - 1e-6 else np.zeros(2)
+            vel = u * vr if sk < s_tot - 1e-6 else np.zeros(2)
             out.append(np.r_[pos, vel])
         return np.array(out)
 
@@ -385,7 +387,8 @@ def city_config(path: str, n_uav: int = 4, t_max: float = 600.0, **kw) -> SimCon
     d = json.load(open(path))
     off = d["offset"]
     kw.setdefault("mpc", MPCParams(margin=10.0, v_max=10.0, vbar=2.0, v_evade=4.0, max_nfz=8))
-    return SimConfig(size=d["size"], cell=d["cell"], n_uav=n_uav, base=(off, off), v_cruise=8.0, epoch=10.0,
+    kw.setdefault("v_cruise", 6.0); kw.setdefault("v_ref", 8.0)   # planning slack for the PX4 autopilot
+    return SimConfig(size=d["size"], cell=d["cell"], n_uav=n_uav, base=(off, off), epoch=10.0,
                      t_max=t_max, endurance=1e9, sigma=55.0, radius=80.0, n_survivor_expected=5.0, n_clusters=2,
                      n_nfz=2, nfz_r=(40.0, 70.0), vbar=2.0, static_obstacles=tuple(map(tuple, d["obstacles"])), **kw)
 

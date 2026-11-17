@@ -27,6 +27,7 @@ PYEOF
     log "$pol $seed try $try failed: $(tail -1 $out.log)"
     city-status >> $R/run.log 2>&1
   done
+  mkdir -p $out/ulog && cp /work/px4_run/px4_*/log/*/*.ulg $out/ulog/ 2>/dev/null; for i in 0 1 2 3; do cp /work/px4_run/px4_$i/out.log $out/ulog/px4_$i.out.log 2>/dev/null; done
   log "$pol $seed: $(tail -1 $out.log)"
 done < cloud/airsim_city/plan.txt
 px4-sitl stop > /dev/null 2>&1; city-stop > /dev/null 2>&1
