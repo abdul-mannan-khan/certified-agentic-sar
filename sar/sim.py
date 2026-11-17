@@ -196,7 +196,7 @@ class Mission:
                 obj = EpochObjective(self.model, self.p)
                 A = [sets[i] for i in live]
                 t0 = time.perf_counter()
-                if policy in ("greedy", "best_of", "certified"):
+                if policy in ("greedy", "best_of", "certified", "ungated"):
                     # Fallback target (Theorem 4): nearest cell, by free-space path, with residual >= eps / q0;
                     # if none is left, the cell of largest residual. One hop = the reachable cell closest to it.
                     resid = np.where(blocked, 0.0, self.p)
@@ -207,8 +207,10 @@ class Mission:
                         cand = np.flatnonzero((resid >= c.epsilon / c.q0) & np.isfinite(dfree))
                         tgt = int(cand[np.argmin(dfree[cand])]) if len(cand) else int(np.argmax(resid))
                         fb.append(min(sets[i], key=lambda a: np.hypot(cx[a] - cx[tgt], cy[a] - cy[tgt])))
-                    d = plan_epoch(obj, A, proposer=proposer if policy == "certified" else None,
-                                   beta=c.beta, use_hungarian=(policy == "best_of"),
+                    if proposer is not None and hasattr(proposer, "bind"):
+                        proposer.bind(self, live, sets, blocked)
+                    d = plan_epoch(obj, A, proposer=proposer if policy in ("certified", "ungated") else None,
+                                   beta=(0.0 if policy == "ungated" else c.beta), use_hungarian=(policy == "best_of"),
                                    epsilon=c.epsilon, fallback_targets=fb)
                     acts = d.actions; ratios.append(d.certified_ratio)
                     acc_n += sum(d.accepted); acc_k += len(d.accepted); fb_n += sum(d.fallback)

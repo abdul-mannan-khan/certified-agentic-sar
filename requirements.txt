@@ -3,3 +3,5 @@ scipy>=1.11
 osqp>=1.0
 matplotlib>=3.8
 pytest>=8
+pymavlink>=2.4
+torch>=2.3
