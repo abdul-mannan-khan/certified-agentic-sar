@@ -4,3 +4,5 @@ bash: warning: setlocale: LC_ALL: cannot change locale (en_US.UTF-8)
 2026-11-17_06:58:46 run_all started
 2026-11-17_07:18:58 pulled: 2026-11-17_06:59:26 campaigns restarted after metric fix (989f522)
 2026-11-17_07:39:06 pulled: 2026-11-17_07:20:17 main done
+2026-11-17_07:59:16 pulled: 2026-11-17_07:55:27 mismatch done
+2026-11-17_08:19:25 pulled: 2026-11-17_08:16:02 milp done

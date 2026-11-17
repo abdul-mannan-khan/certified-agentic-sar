@@ -386,7 +386,7 @@ def city_config(path: str, n_uav: int = 4, t_max: float = 600.0, **kw) -> SimCon
     import json
     d = json.load(open(path))
     off = d["offset"]
-    kw.setdefault("mpc", MPCParams(margin=10.0, v_max=10.0, vbar=2.0, v_evade=4.0, max_nfz=8))
+    kw.setdefault("mpc", MPCParams(margin=10.0, v_max=10.0, vbar=2.0, v_evade=4.0, max_nfz=12))
     kw.setdefault("v_cruise", 8.0)
     return SimConfig(size=d["size"], cell=d["cell"], n_uav=n_uav, base=(off, off), epoch=10.0,
                      t_max=t_max, endurance=1e9, sigma=55.0, radius=80.0, n_survivor_expected=5.0, n_clusters=2,

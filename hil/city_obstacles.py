@@ -19,7 +19,9 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--heightmap", required=True); ap.add_argument("--alt", type=float, default=120)
 ap.add_argument("--clearance", type=float, default=20); ap.add_argument("--cell", type=float, default=40)
 ap.add_argument("--size", type=float, default=560); ap.add_argument("--offset", type=float, default=20)
-ap.add_argument("--border", type=float, default=5); ap.add_argument("--out", required=True)
+ap.add_argument("--border", type=float, default=5); ap.add_argument("--sub", type=float, default=0.0,
+                help="if > 0: obstacle discs per sub-cell of this size (m) instead of per planning cell")
+ap.add_argument("--out", required=True)
 a = ap.parse_args()
 d = np.load(a.heightmap, allow_pickle=True)
 H = np.where(d["valid"].astype(bool), d["h"], np.nan); n0, e0, res = float(d["n0"]), float(d["e0"]), float(d["res"])
@@ -34,7 +36,16 @@ for i in range(nc):          # i: north index (mission x), j: east index (missio
         ceil[i, j] = m
         if m > a.alt - a.clearance:
             obs.append([(i + 0.5) * a.cell, (j + 0.5) * a.cell, a.cell / np.sqrt(2)])
-json.dump(dict(alt=a.alt, clearance=a.clearance, cell=a.cell, size=a.size, offset=a.offset,
+if a.sub > 0:      # finer obstacle geometry: one disc per tall sub-cell keeps streets at their true width
+    obs = []; ns = int(round(a.size / a.sub))
+    for i in range(ns):
+        for j in range(ns):
+            N0, E0 = i * a.sub - a.offset, j * a.sub - a.offset
+            r0, c0 = int((N0 - n0) / res), int((E0 - e0) / res); k = int(a.sub / res)
+            blk = H[max(0, r0):r0 + k, max(0, c0):c0 + k]
+            if np.isfinite(blk).any() and np.nanmax(blk) > a.alt - a.clearance:
+                obs.append([(i + 0.5) * a.sub, (j + 0.5) * a.sub, a.sub / np.sqrt(2)])
+json.dump(dict(alt=a.alt, sub=a.sub, clearance=a.clearance, cell=a.cell, size=a.size, offset=a.offset,
                obstacles=obs, ceiling=ceil.round(1).tolist(), source="downward depth survey of AirSim 1.8.1 CityEnviron"),
           open(a.out, "w"))
 print(len(obs), "obstacle cells of", nc * nc)
