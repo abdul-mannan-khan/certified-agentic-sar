@@ -75,3 +75,43 @@ def reachable_cells(start: int, n_rows: int, n_cols: int, cell_size: float,
                 dist[v] = nd
                 heapq.heappush(heap, (nd, v))
     return dist
+
+
+def grid_path(a: int, b: int, n_rows: int, n_cols: int, blocked: np.ndarray) -> list[int]:
+    """Shortest 8-connected free path of cells from a to b (no corner cutting).
+    Cell a may be blocked (a UAV caught by a moving NFZ must be able to leave).
+    Returns [a] if b is unreachable."""
+    dist, prev, h = {a: 0.0}, {}, [(0.0, a)]
+    while h:
+        d, u = heapq.heappop(h)
+        if u == b:
+            break
+        if d > dist[u]:
+            continue
+        r, c = divmod(u, n_cols)
+        for dr in (-1, 0, 1):
+            for dc in (-1, 0, 1):
+                rr, cc = r + dr, c + dc
+                if (dr or dc) and 0 <= rr < n_rows and 0 <= cc < n_cols:
+                    v = rr * n_cols + cc
+                    if blocked[v] or (dr and dc and (blocked[r * n_cols + cc] or blocked[rr * n_cols + c])):
+                        continue
+                    nd = d + (1.4142135623730951 if dr and dc else 1.0)
+                    if nd < dist.get(v, np.inf):
+                        dist[v], prev[v] = nd, u
+                        heapq.heappush(h, (nd, v))
+    if b not in dist:
+        return [a]
+    path = [b]
+    while path[-1] != a:
+        path.append(prev[path[-1]])
+    return path[::-1]
+
+
+def free_distances(src: int, n_rows: int, n_cols: int, cell_size: float, blocked: np.ndarray) -> np.ndarray:
+    """Free-space path length (m) from src to every cell (inf if unreachable)."""
+    d = reachable_cells(src, n_rows, n_cols, cell_size, blocked, np.inf)
+    out = np.full(n_rows * n_cols, np.inf)
+    for k, v in d.items():
+        out[k] = v
+    return out
