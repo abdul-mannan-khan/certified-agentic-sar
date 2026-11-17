@@ -167,6 +167,10 @@ def main():
     pooled = [e for p in ("main/*.jsonl", "safety/safety.jsonl", "mismatch/*.jsonl", "scale/*.jsonl") for e in load(f"{R}/{p}")]
     if pooled:
         line, s = safety_block("all bounded-speed (pooled)", pooled); md.append(line); saf["pooled"] = s
+        held = [e for e in pooled if e.get("a3_violation_steps", 0) == 0]
+        line, s = safety_block("pooled, A1-A3 all hold (Theorem 4 premise)", held); md.append(line); saf["pooled_a3_held"] = s
+        failed = [e for e in pooled if e.get("a3_violation_steps", 0) > 0]
+        line, s = safety_block("pooled, A3 failed", failed); md.append(line); saf["pooled_a3_failed"] = s
     md.append("")
     for name in ("mismatch", "scale"):
         eps = load(f"{R}/{name}/*.jsonl")

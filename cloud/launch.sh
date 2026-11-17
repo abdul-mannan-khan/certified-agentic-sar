@@ -31,8 +31,8 @@ while true; do
   eval $RS 2>>$LOG && last=$(date +%s)
   say "pulled: $(tail -1 $L/run.log 2>/dev/null)"
   if [ -f $L/DONE ]; then
-    eval $RS; n_local=$(find $L -type f | wc -l); n_box=$($S 'find /work/results -type f | wc -l')
-    if [ "$n_local" = "$n_box" ]; then vastai destroy instance $ID -y >> $LOG; kill $(cat $D/hardstop.pid) 2>/dev/null; say "DONE: $n_local files verified, destroyed $ID"; exit 0; fi
+    eval $RS; n_diff=$(eval rsync -azc --dry-run -i ${RS#rsync -az} 2>/dev/null | grep -vc "^\.d")
+    if [ "$n_diff" = "0" ]; then vastai destroy instance $ID -y >> $LOG; kill $(cat $D/hardstop.pid) 2>/dev/null; say "DONE: checksum dry-run 0 differences, destroyed $ID"; exit 0; fi
   fi
   if [ $(( $(date +%s) - last )) -gt 5400 ]; then say "stall: no pull for 90 min, destroying"; vastai destroy instance $ID -y; exit 1; fi
 done
