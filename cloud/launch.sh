@@ -22,7 +22,7 @@ for t in $(seq 1 60); do
 [ -z "$S" ] && { say "never ready"; vastai destroy instance $ID -y; exit 1; }
 echo "$S" > $D/ssh.txt; say "ready: $S"
 $S 'mkdir -p /work && cd /work && git clone -q https://github.com/abdul-mannan-khan/certified-agentic-sar.git && python3 -m venv venv && . venv/bin/activate && pip -q install numpy scipy osqp matplotlib pytest pymavlink && pip -q install torch --index-url https://download.pytorch.org/whl/cpu && echo setup-ok' >> $LOG 2>&1
-$S 'cd /work && setsid nohup bash certified-agentic-sar/cloud/run_all.sh > /work/run_all.out 2>&1 < /dev/null &'
+$S 'cd /work && NC_EFF=${NC_EFF:-64} setsid nohup bash certified-agentic-sar/cloud/run_all.sh > /work/run_all.out 2>&1 < /dev/null &'
 say "run_all started"
 RS="rsync -az -e \"${S% root@*}\" ${S##* }:/work/results/ $L/"
 last=$(date +%s)

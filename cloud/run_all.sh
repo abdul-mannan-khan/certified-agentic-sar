@@ -4,7 +4,7 @@ set -u
 cd /work/certified-agentic-sar; R=/work/results; mkdir -p $R
 . /work/venv/bin/activate
 export PYTHONPATH=$PWD OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
-NC=$(nproc); W=$((NC - 12))
+NC=${NC_EFF:-$(nproc)}; W=$((NC - 12))   # set NC_EFF to the effective core count (Vast: cpu_cores_effective)
 log() { echo "$(date -u +%F_%T) $*" | tee -a $R/run.log; }
 log "start: $NC cores, $W campaign workers"
 python -m pytest -q -p no:warnings tests > $R/tests.txt 2>&1; log "tests: $(tail -1 $R/tests.txt)"
