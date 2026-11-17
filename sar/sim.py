@@ -292,7 +292,7 @@ class Mission:
                     a, info = self.mpc[i].step(self.x[i], ref, zs)
                     mpc_ms.append(time.perf_counter() - t0)
                     refs[i] = refs[i][1:] if len(refs[i]) > 1 else refs[i]
-                    self.plant.apply(i, a, self.x[i])
+                    self.plant.apply(i, a, self.x[i], info["plan"][0] if info.get("plan") is not None else None)
                     if self.record:
                         self.trace.append((self.t, i, *self.x[i], *a, *ref[0], info["mode"]))
                 self.plant.advance(m.dt)          # real plants block until simulated/real time has advanced
@@ -387,7 +387,7 @@ def city_config(path: str, n_uav: int = 4, t_max: float = 600.0, **kw) -> SimCon
     d = json.load(open(path))
     off = d["offset"]
     kw.setdefault("mpc", MPCParams(margin=10.0, v_max=10.0, vbar=2.0, v_evade=4.0, max_nfz=8))
-    kw.setdefault("v_cruise", 6.0); kw.setdefault("v_ref", 8.0)   # planning slack for the PX4 autopilot
+    kw.setdefault("v_cruise", 8.0)
     return SimConfig(size=d["size"], cell=d["cell"], n_uav=n_uav, base=(off, off), epoch=10.0,
                      t_max=t_max, endurance=1e9, sigma=55.0, radius=80.0, n_survivor_expected=5.0, n_clusters=2,
                      n_nfz=2, nfz_r=(40.0, 70.0), vbar=2.0, static_obstacles=tuple(map(tuple, d["obstacles"])), **kw)

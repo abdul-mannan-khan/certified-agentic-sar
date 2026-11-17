@@ -29,7 +29,7 @@ class ModelPlant:
     def states(self):
         return self.x.copy()
 
-    def apply(self, i, a, x_i=None):
+    def apply(self, i, a, x_i=None, plan_next=None):
         self.cmd[i] = a
 
     def advance(self, dt):
@@ -58,6 +58,7 @@ class PX4Plant:
             if L.wait_heartbeat(timeout=60) is None:
                 raise RuntimeError("no heartbeat on " + str(L))
         self.cmd = np.zeros((len(urls), 4))      # vx, vy, ax, ay
+        self.cmd_pos = [None] * len(urls)
         mav = mavutil.mavlink
         for L in self.links:                     # ask for the streams the R1.5 figure needs, at 20 Hz
             for msg_id in (mav.MAVLINK_MSG_ID_LOCAL_POSITION_NED, mav.MAVLINK_MSG_ID_ATTITUDE, mav.MAVLINK_MSG_ID_SERVO_OUTPUT_RAW):
@@ -101,14 +102,32 @@ class PX4Plant:
     def _setpoint(self, k):
         L = self.links[k]
         vx, vy, ax, ay = self.cmd[k]
-        # use vx, vy, z position and ax, ay feed-forward; ignore x, y position and yaw rate
-        mask = (1 << 0) | (1 << 1) | (1 << 5) | (1 << 8) | (1 << 10) | (1 << 11)
+        if self.cmd_pos[k] is not None:
+            # full trajectory set-point from the MPC plan: position, velocity and acceleration feed-forward
+            n, e = self.cmd_pos[k] - self.home[k]
+            mask = (1 << 5) | (1 << 8) | (1 << 10) | (1 << 11)
+        else:
+            # velocity + acceleration feed-forward only (stored plan / backup law)
+            n = e = 0.0
+            mask = (1 << 0) | (1 << 1) | (1 << 5) | (1 << 8) | (1 << 10) | (1 << 11)
         L.mav.set_position_target_local_ned_send(0, L.target_system, L.target_component,
                                                  self.mavutil.mavlink.MAV_FRAME_LOCAL_NED, mask,
-                                                 0, 0, -self.alt, vx, vy, 0, ax, ay, 0, 0, 0)
+                                                 n, e, -self.alt, vx, vy, 0, ax, ay, 0, 0, 0)
 
-    def apply(self, i, a, x_i):
-        v = np.asarray(x_i[2:]) + np.asarray(a) * self.dt
+    def apply(self, i, a, x_i, plan_next=None):
+        """plan_next: MPC-predicted state [px, py, vx, vy] one step ahead (None in stored/backup modes).
+        Without a plan, the velocity set-point is integrated from the PREVIOUS SET-POINT, not from the measured
+        velocity: rebuilding it from the measurement each step cancels the acceleration when the autopilot
+        responds with a delay longer than one step."""
+        a = np.asarray(a, float)
+        if plan_next is not None:
+            self.cmd_pos[i] = np.asarray(plan_next[:2], float)
+            v = np.asarray(plan_next[2:4], float)
+        else:
+            self.cmd_pos[i] = None
+            v = self.cmd[i, :2] + a * self.dt
+            if np.linalg.norm(v - np.asarray(x_i[2:])) > 3.0:          # re-anchor if far from the real velocity
+                v = np.asarray(x_i[2:]) + a * self.dt
         self.cmd[i] = [v[0], v[1], a[0], a[1]]
 
     def advance(self, dt):
@@ -182,9 +201,9 @@ class MixedPlant:
     def states(self):
         return np.vstack([p.states() for p in self.plants])
 
-    def apply(self, i, a, x_i):
+    def apply(self, i, a, x_i, plan_next=None):
         p, j = self.index[i]
-        p.apply(j, a, x_i)
+        p.apply(j, a, x_i, plan_next)
 
     def advance(self, dt):
         for p in self.plants:
