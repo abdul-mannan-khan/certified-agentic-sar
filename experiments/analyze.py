@@ -139,6 +139,9 @@ def safety_block(name, eps):
         for m, v in e["mpc_modes"].items():
             modes[m] += v
     tot = sum(modes.values()) or 1
+    a3 = sum(1 for e in eps if e.get("a3_violation_steps", 0) > 0)
+    k3 = sum(1 for e in eps if e["incursion"] and e.get("a3_violation_steps", 0) > 0)
+    name = f"{name} (A3 failed in {a3} ep., {k3} of the incursions)"
     return (f"| {name} | {n} | {k} | {100*k/n if n else 0:.2f} | [{100*lo:.2f}, {100*hi:.2f}] | {np.min(mc):.1f} | {np.percentile(mc, 5):.1f} | "
             f"{100*modes['stored']/tot:.3f} | {100*modes['backup']/tot:.4f} |"), dict(n=n, k=k, cp=(lo, hi), min_clear=float(np.min(mc)))
 

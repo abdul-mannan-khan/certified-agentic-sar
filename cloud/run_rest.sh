@@ -5,8 +5,8 @@ cd /work/certified-agentic-sar; R=/work/results; . /work/venv/bin/activate
 export PYTHONPATH=$PWD OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
 NC=${NC_EFF:-64}; W=$((NC - 12))
 log() { echo "$(date -u +%F_%T) $*" | tee -a $R/run.log; }
-log "campaigns restarted after metric fix ($(git rev-parse --short HEAD))"
-python experiments/run_campaign.py --name main --policies best_of greedy hungarian lawnmower random --seeds 1000-1099 --workers $W --out $R/main > $R/main.log 2>&1; log "main done"
+log "campaigns restarted on $(git rev-parse --short HEAD)"
+python experiments/run_campaign.py --name main --policies best_of greedy hungarian frontier lawnmower random --seeds 1000-1099 --workers $W --out $R/main > $R/main.log 2>&1; log "main done"
 python experiments/run_campaign.py --name safety --policies best_of --seeds 2000-2499 --workers $W --out $R/safety > $R/safety.log 2>&1; log "safety done"
 python experiments/run_campaign.py --name popup --policies best_of --seeds 3000-3199 --set popup=True --workers $W --out $R/popup > $R/popup.log 2>&1; log "popup done"
 for q in 0.8 1.2; do python experiments/run_campaign.py --name mm$q --policies best_of --seeds 4000-4099 --set q_mismatch=$q --workers $W --out $R/mismatch > $R/mm$q.log 2>&1; done; log "mismatch done"

@@ -87,6 +87,7 @@ class EpisodeResult:
     planned_mass: float = 0.0     # sum of F_k at the planned waypoints (diagnostic)
     reached_rate: float = float('nan')   # fraction of looks taken at the planned waypoint
     escapes: int = 0              # epochs in which a UAV had to escape a blocked cell
+    a3_violation_steps: int = 0   # backup-law steps with >= 2 zones within the influence distance (A3 fails)
 
 
 class Mission:
@@ -210,6 +211,7 @@ class Mission:
         acc_n = acc_k = fb_n = 0
         min_clear, incursion, rtb, det_mass, min_static = np.inf, False, 0, 0.0, np.inf
         reach_n = reach_k = 0
+        a3_viol = 0
         p0 = self.p.copy()
         prior_mass = float(self.p.sum())
         lawn = self._lawnmower_routes() if policy == "lawnmower" else None
@@ -290,6 +292,11 @@ class Mission:
                         ref = np.vstack([ref, np.tile(ref[-1], (m.N - len(ref), 1))]) if len(ref) else np.tile(np.r_[self.x[i, :2], 0, 0], (m.N, 1))
                     t0 = time.perf_counter()
                     a, info = self.mpc[i].step(self.x[i], ref, zs)
+                    if info["mode"] == "backup":
+                        mp = self.mpc[i].p
+                        infl = mp.margin + mp.backup_clearance + mp.vbar * mp.N * mp.dt + 20.0
+                        close = sum(np.hypot(self.x[i, 0] - z[0], self.x[i, 1] - z[1]) - z[2] < infl for z in zs)
+                        a3_viol += int(close >= 2)
                     mpc_ms.append(time.perf_counter() - t0)
                     refs[i] = refs[i][1:] if len(refs[i]) > 1 else refs[i]
                     self.plant.apply(i, a, self.x[i], info["plan"][0] if info.get("plan") is not None else None)
@@ -325,7 +332,7 @@ class Mission:
                              plan_ms=plan_ms, mpc_ms_p95=float(1e3 * np.percentile(mpc_ms, 95)) if mpc_ms else 0.0,
                              rtb=rtb, prior_mass=prior_mass, detected_mass=self._realised(p0),
                              planned_mass=det_mass, reached_rate=reach_k / reach_n if reach_n else float("nan"),
-                             min_static_clearance=float(min_static), escapes=self.escapes)
+                             min_static_clearance=float(min_static), escapes=self.escapes, a3_violation_steps=a3_viol)
 
     # ----- helpers -----
     def _realised(self, p0):
