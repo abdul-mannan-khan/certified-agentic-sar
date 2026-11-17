@@ -23,7 +23,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from sar.plants import MixedPlant, ModelPlant, PX4Plant  # noqa: E402
-from sar.sim import Mission, SimConfig  # noqa: E402
+from sar.sim import Mission, SimConfig, city_config  # noqa: E402
 from dataclasses import asdict  # noqa: E402
 
 
@@ -39,14 +39,22 @@ def main():
     ap.add_argument("--policy", default="best_of")
     ap.add_argument("--seed", type=int, default=1000)
     ap.add_argument("--spacing", type=float, default=15.0, help="spawn spacing along y (m)")
+    ap.add_argument("--city", default=None, help="obstacle json from hil/city_obstacles.py (AirSim CityEnviron)")
+    ap.add_argument("--spawns", nargs="*", default=None, help="vehicle spawn offsets 'N,E' (m) relative to PlayerStart")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
     n_px4 = len(a.urls); n = n_px4 + a.n_virtual
-    cfg = SimConfig(size=a.size, n_uav=n, t_max=a.t_max, endurance=a.endurance, n_nfz=a.n_nfz,
-                    nfz_r=(40.0, 80.0), n_survivor_expected=6.0, base=(25.0, 25.0))
+    if a.city:
+        cfg = city_config(a.city, n_uav=n, t_max=a.t_max)
+    else:
+        cfg = SimConfig(size=a.size, n_uav=n, t_max=a.t_max, endurance=a.endurance, n_nfz=a.n_nfz,
+                        nfz_r=(40.0, 80.0), n_survivor_expected=6.0, base=(25.0, 25.0))
     base = np.array(cfg.base)
-    homes = [base + (0, a.spacing * i) for i in range(n)]
+    if a.spawns:
+        homes = [base + np.array(list(map(float, sp.split(",")))) for sp in a.spawns]
+    else:
+        homes = [base + (0, a.spacing * i) for i in range(n)]
     px4_log = []
     px4 = PX4Plant(a.urls, homes[:n_px4], alt=a.alt, log=px4_log, dt=cfg.mpc.dt)
     plants = [px4]

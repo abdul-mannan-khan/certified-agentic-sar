@@ -6,7 +6,7 @@ D=$(cd "$(dirname "$0")" && pwd); cd $D; OFFER=$1; H=$2; LABEL=cas-access43870; 
 L=${LOCAL_RESULTS:-$HOME/kfupm_ws/certified-agentic-sar/results/vast_$(date -u +%Y%m%d)}; mkdir -p $L
 say() { echo "$(date -u +%F_%T) $*" | tee -a $LOG; }
 ID=$(vastai create instance $OFFER --image python:3.12-bookworm --disk 40 --ssh --direct --label $LABEL \
-  --onstart-cmd 'apt-get update -qq && apt-get install -y -qq openssh-server rsync git >/dev/null; mkdir -p /run/sshd; /usr/sbin/sshd; touch /root/READY' \
+  --onstart-cmd 'apt-get update -qq && apt-get install -y -qq openssh-server rsync git >/dev/null; mkdir -p /run/sshd; /usr/sbin/sshd; touch /root/.no_auto_tmux; touch /root/READY' \
   --raw 2>&1 | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['new_contract'] if d.get('success') else '')")
 [ -z "$ID" ] && { say "create failed"; exit 1; }
 echo $ID > $D/instance.txt; say "created $ID (offer $OFFER), hard stop $H h"

@@ -9,3 +9,9 @@ cloud/instance.txt
 cloud/ssh.txt
 cloud/hardstop.pid
 cloud/vast.log
+cloud/airsim_city/instance.txt
+cloud/airsim_city/ssh.txt
+cloud/airsim_city/hardstop.pid
+cloud/airsim_city/vast.log
+cloud/launch.out
+cloud/airsim_city/launch.out

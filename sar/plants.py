@@ -57,6 +57,11 @@ class PX4Plant:
             if L.wait_heartbeat(timeout=60) is None:
                 raise RuntimeError("no heartbeat on " + str(L))
         self.cmd = np.zeros((len(urls), 4))      # vx, vy, ax, ay
+        mav = mavutil.mavlink
+        for L in self.links:                     # ask for the streams the R1.5 figure needs, at 20 Hz
+            for msg_id in (mav.MAVLINK_MSG_ID_LOCAL_POSITION_NED, mav.MAVLINK_MSG_ID_ATTITUDE, mav.MAVLINK_MSG_ID_SERVO_OUTPUT_RAW):
+                L.mav.command_long_send(L.target_system, L.target_component, mav.MAV_CMD_SET_MESSAGE_INTERVAL, 0,
+                                        msg_id, 50_000, 0, 0, 0, 0, 0)
         self._poll(0.5)
 
     # --- telemetry ---
@@ -72,8 +77,10 @@ class PX4Plant:
                         self.z = getattr(self, "z", np.zeros(len(self.links))); self.z[k] = -m.z
                     elif t == "ATTITUDE":
                         self.att[k] = [m.roll, m.pitch, m.yaw]
-                    elif t == "HIL_ACTUATOR_CONTROLS":
+                    elif t == "HIL_ACTUATOR_CONTROLS":          # HITL: normalised motor outputs
                         self.act[k] = m.controls[:4]
+                    elif t == "SERVO_OUTPUT_RAW":               # SITL: motor PWM (us)
+                        self.act[k] = [m.servo1_raw, m.servo2_raw, m.servo3_raw, m.servo4_raw]
             if time.time() >= end:
                 return
             time.sleep(0.002)
@@ -109,7 +116,7 @@ class PX4Plant:
                 self.log.append((self.t_boot[k], k, *self.x[k], getattr(self, "z", [0] * 9)[k], *self.att[k], *self.act[k], *self.cmd[k]))
 
     # --- mission start / end ---
-    def arm_takeoff(self, climb_s=25.0):
+    def arm_takeoff(self, climb_s=120.0):
         mav = self.mavutil.mavlink
         self.cmd[:] = 0
         for _ in range(40):                      # PX4 needs setpoints before it accepts offboard
