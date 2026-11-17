@@ -30,6 +30,7 @@ from .nmpc import MPCParams, SafeMPC
 from .objective import DetectionModel, EpochObjective, bayes_update
 from .planner import plan_epoch, sequential_greedy, upper_bound
 from .reachable import NFZ, blocked_mask, free_distances, grid_path, reachable_cells
+from .plants import ModelPlant
 
 
 @dataclass
@@ -83,8 +84,9 @@ class EpisodeResult:
 
 
 class Mission:
-    def __init__(self, cfg: SimConfig, seed: int):
+    def __init__(self, cfg: SimConfig, seed: int, plant=None, record: bool = False):
         self.cfg, self.rng = cfg, np.random.default_rng(seed)
+        self.record, self.trace, self.nfz_trace = record, [], []
         self.seed = seed
         c = cfg
         self.n = int(round(c.size / c.cell))
@@ -115,8 +117,10 @@ class Mission:
         self.popup_t = sorted(self.rng.uniform(200, 900, c.n_nfz)) if c.popup else None
         self.active = [not c.popup] * c.n_nfz
         # UAVs: state [px, py, vx, vy], plant acceleration state
-        self.x = np.array([[c.base[0] + 15 * i, c.base[1], 0, 0] for i in range(c.n_uav)], float)
-        self.acc = np.zeros((c.n_uav, 2))
+        x0 = np.array([[c.base[0] + 15 * i, c.base[1], 0, 0] for i in range(c.n_uav)], float)
+        # plant: internal model by default; PX4 SITL / HIL / AirSim plants live in sar/plants.py
+        self.plant = plant if plant is not None else ModelPlant(x0, c.mpc.dt, c.acc_lag, c.gust, np.random.default_rng(seed + 7))
+        self.x = self.plant.states()
         self.mpc = [SafeMPC(c.mpc) for _ in range(c.n_uav)]
         self.home = [False] * c.n_uav
         self.t = 0.0
@@ -238,14 +242,15 @@ class Mission:
                     a, info = self.mpc[i].step(self.x[i], ref, zs)
                     mpc_ms.append(time.perf_counter() - t0)
                     refs[i] = refs[i][1:] if len(refs[i]) > 1 else refs[i]
-                    # plant: first-order acceleration lag + bounded gust
-                    g = self.rng.normal(0, 1, 2); g = c.gust * g / max(1.0, np.linalg.norm(g))
-                    self.acc[i] += (a - self.acc[i]) * min(1.0, m.dt / c.acc_lag)
-                    ae = self.acc[i] + g
-                    self.x[i, :2] += self.x[i, 2:] * m.dt + 0.5 * ae * m.dt ** 2
-                    self.x[i, 2:] += ae * m.dt
+                    self.plant.apply(i, a, self.x[i])
+                    if self.record:
+                        self.trace.append((self.t, i, *self.x[i], *a, *ref[0], info["mode"]))
+                self.plant.advance(m.dt)          # real plants block until simulated/real time has advanced
+                self.x = self.plant.states()
                 self.move_nfz(m.dt)
                 self.t += m.dt
+                if self.record:
+                    self.nfz_trace.append((self.t, [(z.x, z.y, z.r) for z in self.nfz_now()]))
                 for i in range(c.n_uav):
                     for z in self.nfz_now():
                         dcl = np.hypot(self.x[i, 0] - z.x, self.x[i, 1] - z.y) - z.r
