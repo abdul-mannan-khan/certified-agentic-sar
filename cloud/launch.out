@@ -1,0 +1,3 @@
+2026-11-17_06:43:19 created 61031225 (offer 60605914), hard stop 10 h
+2026-11-17_06:47:31 ready: ssh -p 44631 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -o BatchMode=yes -o LogLevel=ERROR -o ServerAliveInterval=30 root@115.73.217.180
+bash: warning: setlocale: LC_ALL: cannot change locale (en_US.UTF-8)

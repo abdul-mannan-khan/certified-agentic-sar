@@ -159,7 +159,7 @@ class SafeMPC:
         p = self.p
         if not nfzs:
             return np.clip(-x[2:] / p.dt, -p.a_max, p.a_max) * 0.7     # brake
-        c = min(nfzs, key=lambda z: np.hypot(x[0] - z[0], x[1] - z[1]) - z[2])
+        c = min(nfzs, key=lambda z: np.hypot(x[0] - z[0], x[1] - z[1]) - z[2])  # nearest zone or obstacle
         n = x[:2] - np.array(c[:2]); n /= max(np.linalg.norm(n), 1e-9)
         t = np.array([-n[1], n[0]])
         vr, vt = x[2:] @ n, x[2:] @ t
@@ -170,7 +170,7 @@ class SafeMPC:
     # --- one control step ---
     def step(self, x0, ref, nfzs):
         """x0: [px,py,vx,vy]; ref: (N, 4) reference states for steps 1..N;
-        nfzs: list of (cx, cy, r) measured now. Returns (a, info)."""
+        nfzs: list of (cx, cy, r[, vbar_j]) measured now; vbar_j = 0 for static obstacles. Returns (a, info)."""
         p, N = self.p, self.p.N
         x0 = np.asarray(x0, float)
         # nominal trajectory for linearisation: stored plan shifted (+ zeros), else hold
@@ -183,10 +183,11 @@ class SafeMPC:
             for l in range(N):
                 r = self.off_n + j * N + l
                 if j < len(near):
-                    cx, cy, rad = near[j]
+                    cx, cy, rad = near[j][:3]
+                    vb = near[j][3] if len(near[j]) > 3 else p.vbar      # per-zone speed bound (0 = static)
                     n = Xn[l, :2] - (cx, cy); nn = np.linalg.norm(n)
                     n = n / nn if nn > 1e-6 else np.array([1.0, 0.0])
-                    rad_t = rad + p.margin + p.vbar * (l + 1) * p.dt
+                    rad_t = rad + p.margin + vb * (l + 1) * p.dt
                     if l == N - 1:
                         rad_t += p.backup_clearance
                     data[self._nfz_idx[j, l]] = n
@@ -222,9 +223,10 @@ class SafeMPC:
 
     def _check(self, X, near, tol=1e-3):
         p = self.p
-        for (cx, cy, rad) in near:
+        for z in near:
+            cx, cy, rad = z[:3]; vb = z[3] if len(z) > 3 else p.vbar
             d = np.hypot(X[:, 0] - cx, X[:, 1] - cy)
-            need = rad + p.margin + p.vbar * p.dt * np.arange(1, p.N + 1)
+            need = rad + p.margin + vb * p.dt * np.arange(1, p.N + 1)
             need[-1] += p.backup_clearance
             if np.any(d < need - tol):
                 return False

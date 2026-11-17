@@ -59,6 +59,7 @@ class SimConfig:
     gust: float = 0.3             # m/s^2, bounded disturbance
     beta: float = 0.9
     epsilon: float = 0.001        # tuned on seeds 1-3 only (fallback 2 %); evaluation seeds >= 1000
+    static_obstacles: tuple = ()  # (x, y, r): e.g. buildings above the flight altitude (speed bound 0)
     mpc: MPCParams = field(default_factory=MPCParams)
 
 
@@ -80,13 +81,17 @@ class EpisodeResult:
     mpc_ms_p95: float
     rtb: int
     prior_mass: float
-    detected_mass: float          # sum over epochs of F_k(S_k) (expected detections)
+    detected_mass: float          # expected detections of the looks actually taken: sum_c p_c(0)(1 - prod(1 - q))
+    min_static_clearance: float = float('inf')   # to static obstacles (buildings), if any
+    planned_mass: float = 0.0     # sum of F_k at the planned waypoints (diagnostic)
+    reached_rate: float = float('nan')   # fraction of looks taken at the planned waypoint
 
 
 class Mission:
     def __init__(self, cfg: SimConfig, seed: int, plant=None, record: bool = False):
         self.cfg, self.rng = cfg, np.random.default_rng(seed)
         self.record, self.trace, self.nfz_trace = record, [], []
+        self.looks, self.planned = [], {}
         self.seed = seed
         c = cfg
         self.n = int(round(c.size / c.cell))
@@ -102,6 +107,12 @@ class Mission:
             w += self.rng.uniform(0.5, 1.5) * np.exp(-((cx - mx) ** 2 + (cy - my) ** 2) / (2 * s * s))
         p = c.n_survivor_expected * w / w.sum()
         self.p = np.clip(p, 0, 0.6)
+        if c.static_obstacles:            # survivors are at street level: no prior mass inside obstacles
+            inside = np.zeros(self.p.size, bool)
+            for (ox, oy, orad) in c.static_obstacles:
+                inside |= np.hypot(cx - ox, cy - oy) <= orad
+            self.p[inside] = 0.0
+            self.p *= c.n_survivor_expected / max(1e-9, self.p.sum()); self.p = np.clip(self.p, 0, 0.6)
         self.truth = self.rng.random(self.p.size) < self.p      # ground truth drawn from the prior
         self.found = np.zeros_like(self.truth)
         # NFZs
@@ -110,10 +121,11 @@ class Mission:
             r = self.rng.uniform(*c.nfz_r)
             while True:
                 x, y = self.rng.uniform(0.2, 0.95, 2) * c.size
-                if np.hypot(x - c.base[0], y - c.base[1]) > r + 400:
+                if np.hypot(x - c.base[0], y - c.base[1]) > r + 0.2 * c.size:
                     break
             hd = self.rng.uniform(0, 2 * np.pi); sp_ = self.rng.uniform(0.5, 1.0) * c.vbar
             self.nfz.append(NFZ(x, y, r, sp_ * np.cos(hd), sp_ * np.sin(hd)))
+        self.static = [NFZ(x, y, r) for (x, y, r) in c.static_obstacles]
         self.popup_t = sorted(self.rng.uniform(200, 900, c.n_nfz)) if c.popup else None
         self.active = [not c.popup] * c.n_nfz
         # UAVs: state [px, py, vx, vy], plant acceleration state
@@ -152,6 +164,7 @@ class Mission:
     def sense(self, i):
         """Look from UAV i's current cell; returns detected cells."""
         s = self.cell_of(self.x[i, :2])
+        self.looks.append(s)
         cells, q = self.true_model.footprint(s)
         hit = cells[(self.truth[cells] & ~self.found[cells]) & (self.rng.random(len(cells)) < q)]
         self.found[hit] = True
@@ -181,11 +194,13 @@ class Mission:
         refs = [None] * c.n_uav
         found_times, ratios, plan_ms, mpc_ms = [], [], [], []
         acc_n = acc_k = fb_n = 0
-        min_clear, incursion, rtb, det_mass = np.inf, False, 0, 0.0
+        min_clear, incursion, rtb, det_mass, min_static = np.inf, False, 0, 0.0, np.inf
+        reach_n = reach_k = 0
+        p0 = self.p.copy()
         prior_mass = float(self.p.sum())
         lawn = self._lawnmower_routes() if policy == "lawnmower" else None
         while self.t < c.t_max and not all(self.home):
-            blocked = blocked_mask(self.model.centres, self.nfz_now(), m.margin, horizon=c.epoch + m.N * m.dt)
+            blocked = blocked_mask(self.model.centres, self.nfz_now() + self.static, m.margin, horizon=c.epoch + m.N * m.dt)
             sets, d_home = self.action_sets(blocked)
             live = [i for i in range(c.n_uav) if sets[i] is not None]
             for i in range(c.n_uav):
@@ -235,9 +250,10 @@ class Mission:
                 for i, a in zip(live, acts):
                     if refs[i] is None or self.rng.random() >= c.p_cmd_loss:   # command delivered
                         refs[i] = self._path_ref(i, a, blocked)
+                        self.planned[i] = a
             # ----- MPC loop for one epoch -----
             for _ in range(steps_per_epoch):
-                zs = [(z.x, z.y, z.r) for z in self.nfz_now()]
+                zs = [(z.x, z.y, z.r, c.vbar) for z in self.nfz_now()] + [(z.x, z.y, z.r, 0.0) for z in self.static]
                 for i in range(c.n_uav):
                     if refs[i] is None:
                         continue
@@ -262,8 +278,12 @@ class Mission:
                         dcl = np.hypot(self.x[i, 0] - z.x, self.x[i, 1] - z.y) - z.r
                         min_clear = min(min_clear, dcl)
                         incursion |= dcl < 0
+                    for z in self.static:
+                        dcl = np.hypot(self.x[i, 0] - z.x, self.x[i, 1] - z.y) - z.r
+                        min_static = min(min_static, dcl)
             for i in range(c.n_uav):
                 if not self.home[i]:
+                    reach_n += 1; reach_k += int(self.cell_of(self.x[i, :2]) == self.planned.get(i, -1))
                     for _ in self.sense(i):
                         found_times.append(self.t)
             if self.found.sum() == self.truth.sum() and self.truth.sum() > 0:
@@ -275,9 +295,18 @@ class Mission:
                              certified_ratio=ratios, accept_rate=acc_n / acc_k if acc_k else float("nan"),
                              fallback_rate=fb_n / acc_k if acc_k else float("nan"), mpc_modes=modes,
                              plan_ms=plan_ms, mpc_ms_p95=float(1e3 * np.percentile(mpc_ms, 95)) if mpc_ms else 0.0,
-                             rtb=rtb, prior_mass=prior_mass, detected_mass=det_mass)
+                             rtb=rtb, prior_mass=prior_mass, detected_mass=self._realised(p0),
+                             planned_mass=det_mass, reached_rate=reach_k / reach_n if reach_n else float("nan"),
+                             min_static_clearance=float(min_static))
 
     # ----- helpers -----
+    def _realised(self, p0):
+        miss = np.ones(self.model.n_cells)
+        for s in self.looks:
+            cells, q = self.model.footprint(s)
+            miss[cells] *= 1 - q
+        return float(np.sum(p0 * (1 - miss)))
+
     def _path_ref(self, i, target, blocked, land=False):
         """Time-parametrised reference along the free grid path at cruise speed."""
         c, m = self.cfg, self.cfg.mpc
@@ -321,6 +350,17 @@ class Mission:
         lawn["idx"][i] = k
         tgt = route[k]
         return min(A, key=lambda a: np.hypot(cx[a] - cx[tgt], cy[a] - cy[tgt]))
+
+
+def city_config(path: str, n_uav: int = 4, t_max: float = 600.0, **kw) -> SimConfig:
+    """Mission settings for the AirSim CityEnviron runs (static obstacles from hil/city_obstacles.py)."""
+    import json
+    d = json.load(open(path))
+    off = d["offset"]
+    kw.setdefault("mpc", MPCParams(margin=10.0, v_max=10.0, vbar=2.0, v_evade=4.0, max_nfz=8))
+    return SimConfig(size=d["size"], cell=d["cell"], n_uav=n_uav, base=(off, off), v_cruise=8.0, epoch=10.0,
+                     t_max=t_max, endurance=1e9, sigma=55.0, radius=80.0, n_survivor_expected=5.0, n_clusters=2,
+                     n_nfz=2, nfz_r=(40.0, 70.0), vbar=2.0, static_obstacles=tuple(map(tuple, d["obstacles"])), **kw)
 
 
 def run_episode(policy: str, seed: int, cfg: Optional[SimConfig] = None, proposer=None) -> dict:
