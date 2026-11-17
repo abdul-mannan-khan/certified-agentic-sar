@@ -34,7 +34,8 @@ def main():
     ap.add_argument("--size", type=float, default=800.0)
     ap.add_argument("--t-max", type=float, default=600.0)
     ap.add_argument("--endurance", type=float, default=1e9)
-    ap.add_argument("--alt", type=float, default=40.0)
+    ap.add_argument("--alt", type=float, default=40.0, help="altitude of the highest layer (m)")
+    ap.add_argument("--layer", type=float, default=0.0, help="vertical spacing between vehicles' altitude layers (m)")
     ap.add_argument("--n-nfz", type=int, default=3)
     ap.add_argument("--policy", default="best_of")
     ap.add_argument("--seed", type=int, default=1000)
@@ -56,7 +57,8 @@ def main():
     else:
         homes = [base + (0, a.spacing * i) for i in range(n)]
     px4_log = []
-    px4 = PX4Plant(a.urls, homes[:n_px4], alt=a.alt, log=px4_log, dt=cfg.mpc.dt)
+    alts = [a.alt - a.layer * k for k in range(n_px4)]      # e.g. 120, 114, 108, 102 m
+    px4 = PX4Plant(a.urls, homes[:n_px4], alt=alts, log=px4_log, dt=cfg.mpc.dt)
     plants = [px4]
     if a.n_virtual:
         x0 = np.array([[*homes[n_px4 + j], 0, 0] for j in range(a.n_virtual)])
@@ -71,7 +73,7 @@ def main():
     finally:
         print("landing", flush=True)
         px4.land_disarm()
-    r = asdict(res); r.update(wall_s=time.time() - t0, urls=a.urls, n_virtual=a.n_virtual, alt=a.alt)
+    r = asdict(res); r.update(wall_s=time.time() - t0, urls=a.urls, n_virtual=a.n_virtual, alt=a.alt, altitudes=alts)
     json.dump(r, open(os.path.join(a.out, "episode.json"), "w"), indent=1, default=float)
     with open(os.path.join(a.out, "trace.csv"), "w", newline="") as f:
         w = csv.writer(f); w.writerow(["t", "uav", "x", "y", "vx", "vy", "ax_cmd", "ay_cmd", "rx", "ry", "rvx", "rvy", "mode"])

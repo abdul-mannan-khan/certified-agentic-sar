@@ -21,7 +21,7 @@ import airsim; c = airsim.MultirotorClient("127.0.0.1"); c.confirmConnection(); 
 PYEOF
     px4-sitl start 4 > $R/px4_start.log 2>&1 < /dev/null
     sleep 20
-    timeout 2400 $PY hil/run_mission_px4.py --city data/cityenviron_alt120_cell40_sub10.json --alt 120 --t-max 600 \
+    timeout 2400 $PY hil/run_mission_px4.py --city data/cityenviron_alt102_cell40_sub10.json --alt 120 --layer 6 --t-max 600 \
       --urls udpin:0.0.0.0:14800 udpin:0.0.0.0:14801 udpin:0.0.0.0:14802 udpin:0.0.0.0:14803 \
       --spawns $SP --policy $pol --seed $seed --out $out > $out.log 2>&1 && break
     log "$pol $seed try $try failed: $(tail -1 $out.log)"

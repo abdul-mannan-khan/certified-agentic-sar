@@ -50,7 +50,10 @@ class PX4Plant:
         self.mavutil = mavutil
         self.links = [mavutil.mavlink_connection(u, source_system=250 + k) for k, u in enumerate(urls)]
         self.home = np.array(home_xy, float).reshape(len(urls), 2)
-        self.alt, self.log, self.timeout, self.dt = alt, log, timeout, dt
+        # alt: one altitude for all, or one per vehicle (altitude layers keep teammates vertically separated)
+        self.alts = np.broadcast_to(np.asarray(alt, float), (len(urls),)).copy()
+        self.alt = float(np.min(self.alts))
+        self.log, self.timeout, self.dt = log, timeout, dt
         self.x = np.zeros((len(urls), 4)); self.t_boot = np.zeros(len(urls))
         self.att = np.zeros((len(urls), 3)); self.act = np.full((len(urls), 4), np.nan)
         self.events = []
@@ -112,7 +115,7 @@ class PX4Plant:
             mask = (1 << 0) | (1 << 1) | (1 << 5) | (1 << 8) | (1 << 10) | (1 << 11)
         L.mav.set_position_target_local_ned_send(0, L.target_system, L.target_component,
                                                  self.mavutil.mavlink.MAV_FRAME_LOCAL_NED, mask,
-                                                 n, e, -self.alt, vx, vy, 0, ax, ay, 0, 0, 0)
+                                                 n, e, -self.alts[k], vx, vy, 0, ax, ay, 0, 0, 0)
 
     def apply(self, i, a, x_i, plan_next=None):
         """plan_next: MPC-predicted state [px, py, vx, vy] one step ahead (None in stored/backup modes).
@@ -173,7 +176,7 @@ class PX4Plant:
             for k in range(len(self.links)):
                 self._setpoint(k)
             self._poll(0.05)
-            if np.all(getattr(self, "z", np.zeros(1)) > self.alt - 2):
+            if np.all(getattr(self, "z", np.zeros(1)) > self.alts - 2):
                 break
 
     def land_disarm(self):
