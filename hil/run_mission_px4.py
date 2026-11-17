@@ -80,6 +80,7 @@ def main():
         w = csv.writer(f); w.writerow(["t_px4", "k", "x", "y", "vx", "vy", "alt", "roll", "pitch", "yaw",
                                        "u1", "u2", "u3", "u4", "vx_sp", "vy_sp", "ax_ff", "ay_ff"])
         w.writerows(px4_log)
+    json.dump(px4.events, open(os.path.join(a.out, "events.json"), "w"), indent=1, default=float)
     nfz = [(z.x, z.y, z.r) for z in m.nfz]
     json.dump(dict(nfz_final=nfz, nfz_trace=m.nfz_trace[::5], truth=np.flatnonzero(m.truth).tolist(), found=np.flatnonzero(m.found).tolist()),
               open(os.path.join(a.out, "world.json"), "w"))

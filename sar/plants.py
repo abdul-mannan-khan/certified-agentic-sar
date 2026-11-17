@@ -53,6 +53,7 @@ class PX4Plant:
         self.alt, self.log, self.timeout, self.dt = alt, log, timeout, dt
         self.x = np.zeros((len(urls), 4)); self.t_boot = np.zeros(len(urls))
         self.att = np.zeros((len(urls), 3)); self.act = np.full((len(urls), 4), np.nan)
+        self.events = []
         for L in self.links:
             if L.wait_heartbeat(timeout=60) is None:
                 raise RuntimeError("no heartbeat on " + str(L))
@@ -72,9 +73,17 @@ class PX4Plant:
                 while (m := L.recv_match(blocking=False)) is not None:
                     t = m.get_type()
                     if t == "LOCAL_POSITION_NED":
-                        self.x[k] = [m.x + self.home[k, 0], m.y + self.home[k, 1], m.vx, m.vy]
-                        self.t_boot[k] = m.time_boot_ms / 1e3
+                        new = np.array([m.x + self.home[k, 0], m.y + self.home[k, 1], m.vx, m.vy])
+                        tb = m.time_boot_ms / 1e3
+                        if self.t_boot[k] > 0 and tb > self.t_boot[k]:
+                            jump = np.linalg.norm(new[:2] - self.x[k, :2] - self.x[k, 2:] * (tb - self.t_boot[k]))
+                            if jump > 3.0:                      # estimator jump: record it as an event
+                                self.events.append(dict(t=tb, k=k, type="position_jump", size_m=float(jump)))
+                        self.x[k] = new
+                        self.t_boot[k] = tb
                         self.z = getattr(self, "z", np.zeros(len(self.links))); self.z[k] = -m.z
+                    elif t == "STATUSTEXT":
+                        self.events.append(dict(t=float(self.t_boot[k]), k=k, type="statustext", text=m.text))
                     elif t == "ATTITUDE":
                         self.att[k] = [m.roll, m.pitch, m.yaw]
                     elif t == "HIL_ACTUATOR_CONTROLS":          # HITL: normalised motor outputs
@@ -116,8 +125,20 @@ class PX4Plant:
                 self.log.append((self.t_boot[k], k, *self.x[k], getattr(self, "z", [0] * 9)[k], *self.att[k], *self.act[k], *self.cmd[k]))
 
     # --- mission start / end ---
+    def wait_estimate_settled(self, tol=0.3, window=10.0, max_wait=180.0):
+        """On the ground, wait until every vehicle's position estimate moves less than tol over `window` s."""
+        t0 = time.time(); hist = []
+        while time.time() - t0 < max_wait:
+            self._poll(0.5); hist.append((time.time(), self.x[:, :2].copy()))
+            old = [h for h in hist if h[0] <= time.time() - window]
+            if old and np.max(np.linalg.norm(self.x[:, :2] - old[-1][1], axis=1)) < tol:
+                return time.time() - t0
+        return None
+
     def arm_takeoff(self, climb_s=120.0):
         mav = self.mavutil.mavlink
+        settled = self.wait_estimate_settled()
+        self.events.append(dict(t=float(self.t_boot[0]), k=-1, type="estimate_settled", after_s=settled))
         self.cmd[:] = 0
         for _ in range(40):                      # PX4 needs setpoints before it accepts offboard
             for k in range(len(self.links)):

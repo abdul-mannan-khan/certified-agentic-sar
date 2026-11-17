@@ -85,6 +85,7 @@ class EpisodeResult:
     min_static_clearance: float = float('inf')   # to static obstacles (buildings), if any
     planned_mass: float = 0.0     # sum of F_k at the planned waypoints (diagnostic)
     reached_rate: float = float('nan')   # fraction of looks taken at the planned waypoint
+    escapes: int = 0              # epochs in which a UAV had to escape a blocked cell
 
 
 class Mission:
@@ -92,6 +93,7 @@ class Mission:
         self.cfg, self.rng = cfg, np.random.default_rng(seed)
         self.record, self.trace, self.nfz_trace = record, [], []
         self.looks, self.planned = [], {}
+        self.escapes = 0
         self.seen = None
         self.seed = seed
         c = cfg
@@ -187,6 +189,14 @@ class Mission:
             reach = reachable_cells(cur, self.n, self.n, c.cell, blocked, c.v_cruise * c.epoch)
             remaining = c.endurance - self.t - c.reserve - c.epoch
             A = [a for a, d in reach.items() if d_home[a] / c.v_cruise <= remaining]
+            if not A and len(reach) == 1 and blocked[cur]:
+                # trapped: the UAV's estimated cell and all its neighbours are blocked (e.g. after an estimator
+                # jump). Escape towards the nearest free cell instead of ending the UAV's mission.
+                free = np.flatnonzero(~blocked)
+                if len(free):
+                    cx, cy = self.model.centres.T
+                    A = [int(free[np.argmin(np.hypot(cx[free] - cx[cur], cy[free] - cy[cur]))])]
+                    self.escapes += 1
             sets.append(A if A else None)
         return sets, d_home
 
@@ -314,7 +324,7 @@ class Mission:
                              plan_ms=plan_ms, mpc_ms_p95=float(1e3 * np.percentile(mpc_ms, 95)) if mpc_ms else 0.0,
                              rtb=rtb, prior_mass=prior_mass, detected_mass=self._realised(p0),
                              planned_mass=det_mass, reached_rate=reach_k / reach_n if reach_n else float("nan"),
-                             min_static_clearance=float(min_static))
+                             min_static_clearance=float(min_static), escapes=self.escapes)
 
     # ----- helpers -----
     def _realised(self, p0):

@@ -156,11 +156,23 @@ class SafeMPC:
 
     # --- backup law ---
     def backup(self, x, nfzs):
+        """Brake-and-evade. With one nearby zone (A3) this is radial evasion from it, as in Theorem 4.
+        With several, the evasion direction is the clearance-weighted sum of the directions away from every
+        zone within the influence distance (a heuristic outside A3); inside a zone the weight is largest."""
         p = self.p
         if not nfzs:
             return np.clip(-x[2:] / p.dt, -p.a_max, p.a_max) * 0.7     # brake
-        c = min(nfzs, key=lambda z: np.hypot(x[0] - z[0], x[1] - z[1]) - z[2])  # nearest zone or obstacle
-        n = x[:2] - np.array(c[:2]); n /= max(np.linalg.norm(n), 1e-9)
+        infl = p.margin + p.backup_clearance + p.vbar * p.N * p.dt + 20.0
+        n = np.zeros(2); nearest = None
+        for z in nfzs:
+            d = x[:2] - np.array(z[:2]); dist = max(np.linalg.norm(d), 1e-9); clr = dist - z[2]
+            if nearest is None or clr < nearest[0]:
+                nearest = (clr, d / dist)
+            if clr < infl:
+                n += (d / dist) / max(clr - p.margin, 1.0) ** 2 if clr > p.margin else (d / dist) * 10.0
+        if np.linalg.norm(n) < 1e-9:
+            n = nearest[1]
+        n /= np.linalg.norm(n)
         t = np.array([-n[1], n[0]])
         vr, vt = x[2:] @ n, x[2:] @ t
         a = (p.a_max if vr < p.v_evade else 0.0) * n - np.clip(vt / p.dt, -p.a_max, p.a_max) * 0.5 * t
