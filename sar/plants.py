@@ -57,9 +57,15 @@ class PX4Plant:
         self.x = np.zeros((len(urls), 4)); self.t_boot = np.zeros(len(urls))
         self.att = np.zeros((len(urls), 3)); self.act = np.full((len(urls), 4), np.nan)
         self.events = []
+        self._hb_t = 0.0
         for L in self.links:
-            if L.wait_heartbeat(timeout=60) is None:
-                raise RuntimeError("no heartbeat on " + str(L))
+            # udpout (HITL through the Jetson router): the router learns our address only from what we send,
+            # so send GCS heartbeats until the autopilot answers
+            t_end = time.time() + 60
+            while L.wait_heartbeat(timeout=1) is None:
+                self._gcs_heartbeat(force=True)
+                if time.time() > t_end:
+                    raise RuntimeError("no heartbeat on " + str(L))
         self.cmd = np.zeros((len(urls), 4))      # vx, vy, ax, ay
         self.cmd_pos = [None] * len(urls)
         mav = mavutil.mavlink
@@ -69,10 +75,20 @@ class PX4Plant:
                                         msg_id, 50_000, 0, 0, 0, 0, 0)
         self._poll(0.5)
 
+    def _gcs_heartbeat(self, force=False):
+        # 1 Hz GCS heartbeat: PX4 treats a missing GCS as data-link loss (HITL board with COM_RC_IN_MODE=4)
+        now = time.time()
+        if force or now - getattr(self, "_hb_t", 0.0) >= 1.0:
+            self._hb_t = now
+            mav = self.mavutil.mavlink
+            for L in self.links:
+                L.mav.heartbeat_send(mav.MAV_TYPE_GCS, mav.MAV_AUTOPILOT_INVALID, 0, 0, 0)
+
     # --- telemetry ---
     def _poll(self, dur=0.0):
         end = time.time() + dur
         while True:
+            self._gcs_heartbeat()
             for k, L in enumerate(self.links):
                 while (m := L.recv_match(blocking=False)) is not None:
                     t = m.get_type()
